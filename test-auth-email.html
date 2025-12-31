@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email OTP Auth Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        input {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        input:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        button:hover:not(:disabled) {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .error {
+            color: red;
+        }
+        .success {
+            color: green;
+        }
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Sign Up / Sign In with Email OTP</h1>
+        <p style="color: #666; margin-bottom: 20px;">
+            Step 1: Enter your email to receive OTP (Sign Up)<br>
+            Step 2: Enter the OTP code from your email (Sign In)
+        </p>
+        
+        <div id="sendOtpSection">
+            <h2 style="color: #007bff; margin-top: 0;">Step 1: Sign Up / Request OTP</h2>
+            <label>Email Address:</label>
+            <input type="email" id="email" placeholder="your@email.com" autocomplete="email">
+            <button onclick="sendOTP()" id="sendOtpBtn">📧 Send OTP to Email</button>
+        </div>
+        
+        <div id="verifyOtpSection" style="display: none;">
+            <h2 style="color: #28a745; margin-top: 20px;">Step 2: Sign In / Verify OTP</h2>
+            <label>Enter 6-digit OTP Code (check your email):</label>
+            <input type="text" id="otpCode" placeholder="123456" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code">
+            <button onclick="verifyOTP()" id="verifyOtpBtn">✅ Verify OTP & Sign In</button>
+            <button onclick="resendOTP()" style="background: #6c757d; margin-top: 5px;">🔄 Resend OTP</button>
+        </div>
+        
+        <div id="tokenSection" style="display: none;">
+            <h2 style="color: #28a745; margin-top: 20px;">✅ Successfully Signed In!</h2>
+            <label>Your JWT Access Token:</label>
+            <textarea id="jwtToken" rows="4" readonly style="font-family: monospace; font-size: 12px;"></textarea>
+            <div style="margin-top: 10px;">
+                <button onclick="copyToken()" style="background: #17a2b8; margin-right: 5px;">📋 Copy Token</button>
+                <button onclick="testSignOut()" style="background: #dc3545;">🚪 Sign Out</button>
+            </div>
+        </div>
+        
+        <div id="result" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3001/api/auth';
+        let currentEmail = '';
+
+        async function sendOTP() {
+            try {
+                const email = document.getElementById('email').value.trim();
+                if (!email) {
+                    showResult('❌ Please enter email address', 'error');
+                    return;
+                }
+
+                if (!isValidEmail(email)) {
+                    showResult('❌ Please enter a valid email address', 'error');
+                    return;
+                }
+
+                currentEmail = email;
+                const btn = document.getElementById('sendOtpBtn');
+                btn.disabled = true;
+                btn.textContent = '⏳ Sending...';
+                showResult('⏳ Sending OTP to ' + email + '...', '');
+                
+                const response = await fetch(`${API_BASE_URL}/send-otp`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('verifyOtpSection').style.display = 'block';
+                    document.getElementById('email').disabled = true;
+                    btn.disabled = false;
+                    btn.textContent = '✅ OTP Sent';
+                    showResult('✅ OTP sent successfully!\n\n📧 Check your email inbox: ' + email + '\n\n' + JSON.stringify(data, null, 2), 'success');
+                    // Focus on OTP input
+                    setTimeout(() => document.getElementById('otpCode').focus(), 100);
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '📧 Send OTP to Email';
+                    showResult('❌ Error: ' + JSON.stringify(data, null, 2), 'error');
+                }
+            } catch (error) {
+                document.getElementById('sendOtpBtn').disabled = false;
+                document.getElementById('sendOtpBtn').textContent = '📧 Send OTP to Email';
+                showResult('❌ Error: ' + error.message, 'error');
+                console.error('Send OTP error:', error);
+            }
+        }
+
+        async function resendOTP() {
+            if (currentEmail) {
+                document.getElementById('email').value = currentEmail;
+                await sendOTP();
+            }
+        }
+
+        async function verifyOTP() {
+            try {
+                const email = currentEmail || document.getElementById('email').value.trim();
+                const otp = document.getElementById('otpCode').value.trim();
+
+                if (!otp) {
+                    showResult('❌ Please enter OTP code', 'error');
+                    return;
+                }
+
+                if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+                    showResult('❌ OTP must be exactly 6 digits', 'error');
+                    return;
+                }
+
+                const btn = document.getElementById('verifyOtpBtn');
+                btn.disabled = true;
+                btn.textContent = '⏳ Verifying...';
+                showResult('⏳ Verifying OTP...', '');
+                
+                const response = await fetch(`${API_BASE_URL}/verify-otp`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, otp })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('jwtToken').value = data.accessToken;
+                    document.getElementById('tokenSection').style.display = 'block';
+                    document.getElementById('verifyOtpSection').style.display = 'none';
+                    btn.disabled = false;
+                    btn.textContent = '✅ Verify OTP & Sign In';
+                    const userInfo = data.user?.id 
+                        ? `👤 User ID: ${data.user.id}\n📧 Email: ${data.user.email}\n\n✅ User data stored in Firestore!`
+                        : `👤 Email: ${data.user?.email || email}\n\n✅ User data stored in Firestore!`;
+                    showResult('✅ Successfully signed in!\n\n' + userInfo + '\n\n📋 Full Response:\n' + JSON.stringify(data, null, 2), 'success');
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '✅ Verify OTP & Sign In';
+                    showResult('❌ Error: ' + JSON.stringify(data, null, 2), 'error');
+                }
+            } catch (error) {
+                document.getElementById('verifyOtpBtn').disabled = false;
+                document.getElementById('verifyOtpBtn').textContent = '✅ Verify OTP & Sign In';
+                showResult('❌ Error: ' + error.message, 'error');
+                console.error('Verify OTP error:', error);
+            }
+        }
+
+        function copyToken() {
+            const token = document.getElementById('jwtToken').value;
+            navigator.clipboard.writeText(token).then(() => {
+                showResult('✅ Token copied to clipboard!', 'success');
+                setTimeout(() => {
+                    const resultDiv = document.getElementById('result');
+                    if (resultDiv.textContent.includes('copied to clipboard')) {
+                        resultDiv.style.display = 'none';
+                    }
+                }, 2000);
+            }).catch(err => {
+                showResult('❌ Failed to copy token: ' + err.message, 'error');
+            });
+        }
+
+        async function testSignOut() {
+            try {
+                const jwtToken = document.getElementById('jwtToken').value;
+                if (!jwtToken) {
+                    showResult('❌ No JWT token available', 'error');
+                    return;
+                }
+
+                showResult('⏳ Signing out...', '');
+                const response = await fetch(`${API_BASE_URL}/sign-out`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + jwtToken
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Reset form
+                    document.getElementById('tokenSection').style.display = 'none';
+                    document.getElementById('verifyOtpSection').style.display = 'none';
+                    document.getElementById('email').disabled = false;
+                    document.getElementById('email').value = '';
+                    document.getElementById('otpCode').value = '';
+                    document.getElementById('jwtToken').value = '';
+                    currentEmail = '';
+                    document.getElementById('sendOtpBtn').textContent = '📧 Send OTP to Email';
+                    showResult('✅ Sign out successful!\n\n' + JSON.stringify(data, null, 2), 'success');
+                } else {
+                    showResult('❌ Sign out error: ' + JSON.stringify(data, null, 2), 'error');
+                }
+            } catch (error) {
+                showResult('❌ Error: ' + error.message, 'error');
+            }
+        }
+
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result ' + type;
+            resultDiv.textContent = message;
+        }
+
+        function isValidEmail(email) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return emailRegex.test(email);
+        }
+    </script>
+</body>
+</html>
+
