@@ -13,6 +13,7 @@ import { User } from './entities/user.entity';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { EmailService } from './services/email.service';
 import { OtpService } from './services/otp.service';
+import { Role } from './enums/role.enum';
 
 @Injectable()
 export class AuthService {
@@ -24,7 +25,11 @@ export class AuthService {
     private otpService: OtpService,
   ) {}
 
-  async sendOTP(email: string, password: string): Promise<{ message: string }> {
+  async sendOTP(
+    email: string,
+    password: string,
+    role?: Role,
+  ): Promise<{ message: string }> {
     try {
       // Check if user already exists
       const existingUser = await this.getUserByEmail(email);
@@ -38,9 +43,13 @@ export class AuthService {
       // Generate OTP
       const otp = this.otpService.generateOTP();
 
-      // Store OTP and password hash temporarily
+      // Default to USER role if not provided
+      const roleToStore = role || Role.USER;
+
+      // Store OTP, password hash, and role temporarily
       this.otpService.storeOTP(email, otp);
       this.otpService.storePassword(email, hashedPassword);
+      this.otpService.storeRole(email, roleToStore);
 
       // Send OTP via email
       await this.emailService.sendOTP(email, otp);
@@ -84,11 +93,33 @@ export class AuthService {
         );
       }
 
-      // Create new user in Firestore with password
-      const user = await this.createOrUpdateUser(email, storedPasswordHash);
+      // Get stored role (from sign-up)
+      const storedRole = this.otpService.getRole(email);
+      if (!storedRole) {
+        throw new UnauthorizedException(
+          'Role not found. Please try signing up again.',
+        );
+      }
 
-      // Clear temporary password store after use
+      // Verify that the provided password matches the stored password
+      const isPasswordValid = await bcrypt.compare(
+        password,
+        storedPasswordHash,
+      );
+      if (!isPasswordValid) {
+        throw new UnauthorizedException('Password does not match');
+      }
+
+      // Create new user in Firestore with password and specified role
+      const user = await this.createOrUpdateUser(
+        email,
+        storedPasswordHash,
+        storedRole,
+      );
+
+      // Clear temporary password and role stores after use
       this.otpService.clearPassword(email);
+      this.otpService.clearRole(email);
 
       console.log('✅ New user created in Firestore:', {
         userId: user.id,
@@ -109,13 +140,14 @@ export class AuthService {
       }
 
       // Generate JWT token
-      const accessToken = this.generateJwt(user.id!, email);
+      const accessToken = this.generateJwt(user.id!, email, user.role);
 
       return {
         accessToken,
         user: {
           id: user.id,
           email: user.email,
+          role: user.role,
         },
       };
     } catch (error) {
@@ -147,8 +179,18 @@ export class AuthService {
         throw new UnauthorizedException('Invalid email or password');
       }
 
-      // Update last login time
-      const updatedUser = await this.createOrUpdateUser(email);
+      // Check if this is the first sign-in (lastLoginAt is null/undefined)
+      const isFirstSignIn = !user.lastLoginAt;
+
+      // Set default role only on first sign-in if user doesn't have one (fallback for legacy users)
+      const roleToSet = isFirstSignIn && !user.role ? Role.USER : undefined;
+
+      // Update last login time and set role on first sign-in if needed
+      const updatedUser = await this.createOrUpdateUser(
+        email,
+        undefined,
+        roleToSet,
+      );
 
       console.log('✅ User signed in:', {
         userId: updatedUser.id,
@@ -168,13 +210,18 @@ export class AuthService {
       }
 
       // Generate JWT token
-      const accessToken = this.generateJwt(updatedUser.id!, email);
+      const accessToken = this.generateJwt(
+        updatedUser.id!,
+        email,
+        updatedUser.role,
+      );
 
       return {
         accessToken,
         user: {
           id: updatedUser.id,
           email: updatedUser.email,
+          role: updatedUser.role,
         },
         message: 'User signed in successfully',
       };
@@ -187,6 +234,7 @@ export class AuthService {
   async createOrUpdateUser(
     email: string,
     passwordHash?: string,
+    role?: Role,
   ): Promise<User> {
     const db = this.database.getDb();
     const usersRef = db.collection('users');
@@ -202,6 +250,7 @@ export class AuthService {
     if (!existingUserQuery.empty) {
       // Update existing user
       const userDoc = existingUserQuery.docs[0];
+      const existingUserData = userDoc.data();
       const userData: any = {
         isVerified: true,
         updatedAt: now,
@@ -211,6 +260,11 @@ export class AuthService {
       // Update password if provided (password reset scenario)
       if (passwordHash) {
         userData.password = passwordHash;
+      }
+
+      // Set role only if provided AND user doesn't already have a role (restrict to one-time assignment)
+      if (role && !existingUserData?.role) {
+        userData.role = role;
       }
 
       await userDoc.ref.update(userData);
@@ -232,6 +286,7 @@ export class AuthService {
       const userData: Omit<User, 'id'> = {
         email,
         password: passwordHash, // Store hashed password
+        role: role || Role.USER, // Default to USER role if not specified
         isVerified: true,
         createdAt: now,
         updatedAt: now,
@@ -265,16 +320,19 @@ export class AuthService {
     }
 
     const doc = query.docs[0];
+    const userData = doc.data();
     return {
       id: doc.id,
-      ...doc.data(),
+      role: userData.role || Role.USER, // Default to USER for existing users
+      ...userData,
     } as User;
   }
 
-  generateJwt(userId: string, email: string): string {
+  generateJwt(userId: string, email: string, role: Role): string {
     const payload = {
       sub: userId,
       email,
+      role,
     };
 
     return this.jwtService.sign(payload);

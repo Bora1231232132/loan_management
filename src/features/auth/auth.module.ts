@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { EmailService } from './services/email.service';
 import { OtpService } from './services/otp.service';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
@@ -35,7 +36,7 @@ import { OtpService } from './services/otp.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, EmailService, OtpService],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, EmailService, OtpService, RolesGuard],
+  exports: [AuthService, RolesGuard],
 })
 export class AuthModule {}

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Role } from '../enums/role.enum';
 
 interface OtpData {
   otp: string;
@@ -10,6 +11,7 @@ interface OtpData {
 export class OtpService {
   private otpStore: Map<string, OtpData> = new Map();
   private passwordStore: Map<string, string> = new Map(); // Store password hashes temporarily
+  private roleStore: Map<string, Role> = new Map(); // Store roles temporarily
   private readonly OTP_EXPIRY_MINUTES = 10;
   private readonly OTP_LENGTH = 6;
 
@@ -41,6 +43,7 @@ export class OtpService {
     if (new Date() > otpData.expiresAt) {
       this.otpStore.delete(email);
       this.passwordStore.delete(email); // Also clear password if OTP expired
+      this.roleStore.delete(email); // Also clear role if OTP expired
       return false;
     }
 
@@ -63,6 +66,18 @@ export class OtpService {
 
   clearPassword(email: string): void {
     this.passwordStore.delete(email);
+  }
+
+  storeRole(email: string, role: Role): void {
+    this.roleStore.set(email, role);
+  }
+
+  getRole(email: string): Role | undefined {
+    return this.roleStore.get(email);
+  }
+
+  clearRole(email: string): void {
+    this.roleStore.delete(email);
   }
 
   private cleanupExpiredOTPs(): void {

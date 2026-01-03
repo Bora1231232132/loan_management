@@ -4,10 +4,12 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { DatabaseService } from 'src/database/database.service';
 import { User } from '../entities/user.entity';
+import { Role } from '../enums/role.enum';
 
 export interface JwtPayload {
   sub: string;
   email: string;
+  role: Role;
 }
 
 @Injectable()
@@ -41,8 +43,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const userData = userDoc.data();
 
+    if (!userData) {
+      throw new UnauthorizedException('User data not found');
+    }
+
     return {
       id: userDoc.id,
+      role: userData.role || Role.USER, // Default to USER for existing users
       ...userData,
     } as User;
   }

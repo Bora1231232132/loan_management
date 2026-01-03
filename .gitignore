@@ -74,6 +74,9 @@ Desktop.ini
 *.cache
 .cache/
 
+# Cursor rules (project-specific)
+.cursorrules
+
 # Optional: Uncomment if you use these
 # .vercel
 # .netlify
